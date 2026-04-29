@@ -1,0 +1,12 @@
+*.pt
+*.pth
+*.ckpt
+
+# Bỏ qua thư mục chứa dataset
+data/
+datasets/
+
+# Bỏ qua các file nén dung lượng lớn
+*.tar.gz
+*.zip
+*.rar
