@@ -33,7 +33,7 @@ After unzipping the downloaded files, place them in the `data/` directory.
 #### For SVHN with multiple local epochs with FedAvg
 
 ```
-python main.py  --local_epoch 10 --dataset CIFAR100 --momentum 0.0 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512 --n_classes 100 --scheme VLI
+python main.py  --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512 --n_classes 10 --scheme VLI
 python main.py --scheme iRLG --local_epoch 10 --dataset SVHN --momentum 0.0 --alpha 0.5 --batch_size 32 --model lenet5 --hidden 400
 python main.py --scheme RLU --local_epoch 10 --dataset SVHN --momentum 0.0 --alpha 0.5 --batch_size 32 --model lenet5 --hidden 400
 python main.py --scheme LLGp --local_epoch 10 --dataset SVHN --momentum 0.0 --alpha 0.5 --batch_size 32 --model lenet5 --hidden 400
@@ -44,15 +44,15 @@ python main.py --scheme ZLGp --local_epoch 10 --dataset SVHN --momentum 0.0 --al
 
 ```
 python main.py --scheme iRLG --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
-python main.py --scheme RLU --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
-python main.py  --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512 --scheme LLGp
+python main.py --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512 --scheme RLU 
+python main.py  --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512 --scheme All
 python main.py --scheme ZLGp --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
 ```
 
 #### For CIFAR100 with multiple local epochs with FedAvg
 ```
 python main.py --scheme iRLG --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
-python main.py --scheme RLU --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
+python main.py  --local_epoch 10 --dataset CIFAR100 --n_classes 200 --momentum 0.0 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512 --scheme RLU
 python main.py --scheme LLGp --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
 python main.py --scheme ZLGp --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
 ```
@@ -70,7 +70,7 @@ python main.py --scheme ZLGp --local_epoch 10 --dataset SVHN --momentum 0.0 --fl
 
 ```
 python main.py --scheme iRLG --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
-python main.py --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512 --scheme RLU
+python main.py --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --fl_scheme fedprox --mu 5 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512 --scheme All
 python main.py --scheme LLGp --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
 python main.py --scheme ZLGp --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
 ```
@@ -82,6 +82,18 @@ python main.py --scheme RLU --local_epoch 10 --dataset CIFAR100 --n_classes 100 
 python main.py --scheme LLGp --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
 python main.py --scheme ZLGp --local_epoch 10 --dataset CIFAR100 --n_classes 100 --momentum 0.0 --fl_scheme fedprox --mu 0.5 --alpha 0.1 --batch_size 256 --model vgg16 --hidden 512
 ```
+
+
+
+
+#### For CIFAR10 with multiple local epochs with FedDyn
+
+```
+python main.py --local_epoch 5 --dataset CIFAR10 --momentum 0.0 --fl_scheme feddyn --weight_decay 1e-3 --alpha_coefficient 1e-2 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512
+```
+
+
+
 #### Citeation
 Please cite our paper, if you happen to use this code:
 ```

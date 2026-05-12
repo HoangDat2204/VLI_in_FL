@@ -9,8 +9,8 @@ from llg import get_label_stats,get_emb,post_process_emb,get_irlg_res
 import torch
 from client.client_utils import estimate_static_RLU, estimated_entropy_from_grad, estimate_static_RLU_with_posterior
 from client.client_utils import estimate_static_LLG,estimate_static_ZLG
-from client.client_utils import create_synthetic_basis_matrix, calculate_distribution_ratios, estimate_static_VLI
-from client.attacks import RLU_attack, LLGp_attack, ZLGp_attack, VLI_attack
+from client.client_utils import create_synthetic_basis_matrix, calculate_distribution_ratios, estimate_static_VLI, estimate_static_VLI_RLU, calculate_dynamic_boost
+from client.attacks import RLU_attack, LLGp_attack, ZLGp_attack, VLI_attack, LLG_attack
 
 import torch.nn.functional as F
 
@@ -18,6 +18,8 @@ import numpy as np
 import copy
 import scipy
 np.set_printoptions(suppress=True, precision=2)
+
+
 class Client(object):
     def __init__(self, args, Loader_train, idx, device, model_name, aux_dataset):
         self.args = args
@@ -26,6 +28,13 @@ class Client(object):
         self.device = device
         self.aux_dataset = aux_dataset
         channel = 3
+        if self.args.dataset == 'MNIST':
+            channel = 1
+        elif self.args.dataset in ['CIFAR10', 'CIFAR100', 'CUB200', 'Tiny']:
+            channel = 3
+        else:
+            channel = 3 
+
         tanh = False
         if args.activation == 'tanh':
             tanh = True
@@ -311,15 +320,18 @@ class Client(object):
                 w_grad_epochs = w_grad_epochs / self.args.local_epochs
                 count = 0
                 count_computed += 1
-
+                
                 h1_extraction = []
                 gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1)
+                print(gradients_for_prediction)
                 # filter negative values
                 for i_cg, class_gradient in enumerate(gradients_for_prediction):
                     if class_gradient < 0:
                         h1_extraction.append((i_cg, class_gradient))
 
                 gradients_for_prediction -= new_offset
+                print(gradients_for_prediction)
+
                 prediction = []
 
                 for (i_c, _) in h1_extraction:
@@ -337,6 +349,8 @@ class Client(object):
                 n = []
                 for i in range(self.args.n_classes):
                     n.append(self.args.local_epochs * prediction.count(i))
+
+    
 
                 class_existences = [1 if n[i] > 0 else 0 for i in range(len(n))]
                 cAcc = accuracy_score(existences, class_existences)
@@ -471,11 +485,13 @@ class Client(object):
         count = 0
 
         b_grad_epochs = torch.zeros([self.args.n_classes])
+        w_grad_epochs = torch.zeros([self.args.n_classes, self.latent_dim])
         targets_epochs = []
-        alpha= 1.5 #1.0 #1.0 #1.5
-        beta = 2.0 #1.0 #2.0 #3.0
+        # alpha= 1.5 #1.0 #1.0 #1.5
+        beta = 1.1 #1.0 #2.0 #3.0
         batch_size  = self.args.batch_size *  self.args.local_epochs
         probs_epochs = 0
+        length_total = 0
         for batch_idx, (inputs, targets) in enumerate(self.trainloader):
             # measure data loading time
             labels, existences, num_instances, num_instances_nonzero = get_label_stats(targets, self.args.n_classes)
@@ -497,12 +513,23 @@ class Client(object):
 
             w_grad, b_grad = grads[-2], grads[-1]
             b_grad_epochs += b_grad
+            w_grad_epochs += w_grad
             count += 1
             probs = F.softmax(outputs, dim=1)
+            # print(targets)
+            num_instances = np.zeros(self.args.n_classes)
+            for k in range(self.args.n_classes):
+                num_instances[k] = targets.tolist().count(k)
             
-            probs_epochs += torch.sum(probs , dim=0)/self.args.batch_size
-            if count == self.args.local_epochs:
-                print("Probs: ", probs_epochs/self.args.local_epochs)
+            # print(num_instances)
+            # print(probs)
+
+            
+            # probs_epochs += torch.sum(probs , dim=0)/self.args.batch_size
+            if (count-1) != 0 and (count-1) % self.args.local_epochs == 0 :
+                # new_mu, new_shift = estimate_static_VLI_RLU(self.args, copy.deepcopy(self.model), self.aux_dataset)
+
+                # print("Probs: ", probs_epochs/self.args.local_epochs)
                 probs_epochs = 0
                 targets_epochs = torch.cat(targets_epochs, dim=0)
                 targets_epochs = targets_epochs.tolist()
@@ -510,29 +537,37 @@ class Client(object):
                 for k in range(self.args.n_classes):
                     num_instances[k] = targets_epochs.count(k)
                 b_grad_epochs = b_grad_epochs 
-                count = 0
+               
                 count_computed += 1
-                gradients_for_prediction = b_grad_epochs 
-
+                # gradients_for_prediction = b_grad_epochs 
+                print(b_grad_epochs)
+                length = np.linalg.norm(b_grad_epochs)
+                length_total +=  length
+                print("length: ", length)
+                gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1)
+                # print(gradients_for_prediction)
                 negative_elements = gradients_for_prediction[gradients_for_prediction < 0]
     
                 if len(negative_elements) > 0:
                     sum_negative = torch.sum(negative_elements)
                 else:
                     sum_negative = torch.sum(gradients_for_prediction)
-
+                
                 base_diagonal_val = sum_negative / batch_size
+                
                 Basis = create_synthetic_basis_matrix(self.args.n_classes, base_diagonal_val)
                 probs = calculate_distribution_ratios(gradients_for_prediction, Basis)
-                max_p = np.max(probs)
+                sorted_probs = sorted(probs, reverse=True)
+                max_idx = np.argmax(probs)
+                max_p = probs[max_idx]
+                print("probs: ", probs)
+                accelerate = calculate_dynamic_boost(probs, length)
+                print("boost value: ", accelerate)
                 
-    
-             
-                  
-              
-                boost_factor = alpha  + beta * (1 - max_p)
+                # boost_factor = alpha + beta * accelerate
+                boost_factor =   accelerate
                 
-                final_diagonal_val = base_diagonal_val * boost_factor
+                final_diagonal_val = base_diagonal_val * boost_factor 
                 Basis = create_synthetic_basis_matrix(self.args.n_classes, final_diagonal_val)
                 residual = gradients_for_prediction.clone()
                 counts = np.zeros(self.args.n_classes, dtype=int)
@@ -557,13 +592,15 @@ class Client(object):
                 labels = range(self.args.n_classes)
                 irec = sum([n[i] if n[i] <= num_instances[i] else num_instances[i] for i in labels]) / (
                             self.args.batch_size * self.args.local_epochs)
-                print(num_instances)
-                print(n)
+                print('real lables: ', num_instances)
+                print('Guess labels: ', n)
                 print('irec:', irec)
+                print('='*30)
                 average_acc += acc
                 average_irec += irec
                 average_cAcc += cAcc
                 b_grad_epochs = torch.zeros([self.args.n_classes])
+                w_grad_epochs = torch.zeros([self.args.n_classes, self.latent_dim])
                 targets_epochs = []
                 self.load_model(global_weights)
 
@@ -571,6 +608,7 @@ class Client(object):
         average_irec = average_irec / count_computed
         average_cAcc = average_cAcc / count_computed
 
+        # print('length total:', length_total/count) 
         print('average irec:', average_irec)
         return average_cAcc, average_irec
 
@@ -578,10 +616,10 @@ class Client(object):
         self.model.train()
 
         #Initilize variables
-        methods = ['RLU', 'LLGp', 'ZLGp', 'VLI']
-        average_acc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-        average_irec = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-        average_cAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
+        methods = ['RLU', 'LLGp', 'ZLGp', 'VLI', 'LLG']
+        average_acc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0, 'LLG': 0.0}
+        average_irec = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0,'LLG': 0.0}
+        average_cAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0, 'LLG': 0.0}
         count_computed = 0
         count = 0
         b_grad_epochs = torch.zeros([self.args.n_classes])
@@ -641,12 +679,12 @@ class Client(object):
                 result_irec = {}
                 result_cAcc = {}
 
-
                 result_Acc['RLU'], result_irec['RLU'], result_cAcc['RLU'] = self.accuracy_calculation(RLU_attack(model = copy.deepcopy(self.model) , w_grad_epochs = w_grad_epochs, b_grad_epochs =  b_grad_epochs, latent_dim =  self.latent_dim, mu =  self.mu,  aux_dataset = self.aux_dataset, args =  self.args), existences, num_instances)
                 result_Acc['ZLGp'], result_irec['ZLGp'], result_cAcc['ZLGp'] = self.accuracy_calculation(ZLGp_attack(model = copy.deepcopy(self.model), gradients_for_prediction =  torch.sum(w_grad_epochs, dim=-1), O_bar = O_bar , pj = pj, aux_dataset = self.aux_dataset, args = self.args), existences, num_instances)
                 result_Acc['LLGp'], result_irec['LLGp'], result_cAcc['LLGp'] = self.accuracy_calculation(LLGp_attack(model = copy.deepcopy(self.model), gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1), impact = impact, offset = offset, aux_dataset = self.aux_dataset,args = self.args), existences, num_instances)
                 result_Acc['VLI'], result_irec['VLI'], result_cAcc['VLI'] =  self.accuracy_calculation(VLI_attack( b_grad_epochs * self.args.local_epochs, self.args), existences, num_instances)
 
+                result_Acc['LLG'], result_irec['LLG'], result_cAcc['LLG'] = self.accuracy_calculation(LLG_attack(model = copy.deepcopy(self.model), gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1), args = self.args), existences, num_instances)
 
                 for m in methods:
                     average_acc[m] += result_Acc[m]

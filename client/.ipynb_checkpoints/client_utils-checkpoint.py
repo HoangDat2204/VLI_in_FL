@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch
 from llg import get_label_stats,get_emb,post_process_emb,get_irlg_res
 import torch.nn.functional as F
-
+import math
 def getsize(list_input):
     rows = len(list_input) 
     cols = len(list_input[0])
@@ -40,11 +40,11 @@ def estimate_static_RLU_with_posterior(args, N, mu, new_mu, O):
                 Delta[i] = sum_delta
             new_shift.append(new_shift[-1] + Delta)
             new_shift_softmax.append(scipy.special.softmax(new_shift[-1]))
-        Diff = new_shift[last_epoch] - new_mu[last_epoch]
+        Diff = new_shift[last_epoch] - new_mu
 
-        larger = np.where(new_shift[last_epoch] - new_mu[last_epoch] >= 0)[0]
+        larger = np.where(new_shift[last_epoch] - new_mu >= 0)[0]
         abs_larger = abs(Diff[larger])
-        smaller = np.where(new_shift[last_epoch] - new_mu[last_epoch] < 0)[0]
+        smaller = np.where(new_shift[last_epoch] - new_mu < 0)[0]
         abs_smaller = abs(Diff[smaller])
 
         if len(larger.tolist()) == 0 or len(smaller.tolist()) == 0:
@@ -276,23 +276,29 @@ def estimate_static_ZLG(args, model, aux_data):
 
         count = 0
         for batch_idx, (inputs, targets) in enumerate(aux_loader):
-            # inputs = torch.randn_like(inputs)
-            #inputs = torch.zeros_like(inputs)
             inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
-            inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
+            
+            # 1. BỎ DÒNG CŨ: inputs, targets = torch.autograd.Variable(inputs)...
+            # PyTorch hiện đại tự động hiểu Tensor là biến, không cần bọc nữa.
+
             # compute output
             outputs, embedding = model(inputs)
             loss = criterion(outputs, targets)
-
+            
+            # Cắt đứt Computation Graph của embedding
+            embedding_clean = embedding.detach().cpu()
+            
             probs = torch.softmax(outputs, dim=-1)
-
             mean_probs = torch.mean(probs, dim=0)
-            embedding_sum = torch.sum(embedding, dim=1)
-
+            
+            embedding_sum = torch.sum(embedding_clean, dim=1)
             mean_embedding = torch.mean(embedding_sum, dim=0)
 
             O_bar += mean_embedding
-            pj[k] += mean_probs[k]
+            
+            # 2. SỬA LỖI CHÍ MẠNG: Thêm .item() để chỉ lấy con số thực (float), vứt bỏ đồ thị!
+            pj[k] += mean_probs[k].item() 
+            
             count += 1
 
     O_bar = O_bar / (args.n_classes * count)
@@ -379,7 +385,8 @@ def create_synthetic_basis_matrix(num_classes, diagonal_value):
         off_diagonal_value = -diagonal_value / (num_classes - 1)
     else:
         off_diagonal_value = 0.0
-
+    # print("Off diagonal value: ", off_diagonal_value)
+    # print("Diagonal value: ", diagonal_value)
     # Khởi tạo ma trận với giá trị off-diagonal
     basis_matrix = np.full((num_classes, num_classes), off_diagonal_value)
     
@@ -447,3 +454,114 @@ def calculate_distribution_ratios(sum_vector, basis_vectors):
         ratios = np.zeros_like(clean_projections)
         
     return ratios
+
+
+def estimate_static_VLI_RLU(args, model, aux_dataset):
+    model.train()
+    aux_loader = torch.utils.data.DataLoader(aux_dataset, batch_size=args.batch_size, shuffle=True)
+
+    model.train()
+    predictions = []
+    predictions_softmax = []
+    ground_truths = []
+    count = 0 
+    for batch_idx, (inputs, targets) in enumerate(aux_loader):
+        # inputs = torch.randn_like(inputs)
+        # inputs = torch.zeros_like(inputs)
+        inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+        inputs, targets = torch.autograd.Variable(inputs), torch.autograd.Variable(targets)
+        count += 1 
+
+        # compute output
+        outputs, _ = model(inputs)
+        probs = torch.softmax(outputs, dim=-1)
+        ground_truths.append(np.array(targets.detach().cpu()))
+        predictions.append(np.array(outputs.detach().cpu()))
+        predictions_softmax.append(np.array(probs.detach().cpu()))
+        # print("="*60)
+        # print("Aux Data batchidx: ", batch_idx)
+        # print("Logit vector: ",  len(outputs))
+        # print("ground_truths vector: ",  getsize(ground_truths))
+        # print("predictions vector: ",  getsize(predictions))
+        # print("predictions_softmax vector: ",  getsize(predictions_softmax))
+
+
+
+    mis_predictions_maxrix = matrix(args, predictions, ground_truths)
+    mis_predictions_softmax = matrix(args, predictions_softmax, ground_truths)
+    print(mis_predictions_softmax)
+    mu = np.zeros(args.n_classes)
+    for i in range(args.n_classes):
+        mu[i] = (np.sum(mis_predictions_maxrix[i]) - mis_predictions_maxrix[i, i]) / (args.n_classes - 1)
+    shift = np.zeros(args.n_classes)
+    for i in range(args.n_classes):
+        shift[i] = (np.sum(mis_predictions_softmax[i]) - mis_predictions_softmax[i, i]) / (args.n_classes - 1)
+    return mu, shift
+
+
+
+def calculate_dynamic_boost(vector, length, min_boost=1.0, max_boost=3.0, w_top1=0.7, w_top2=0.0, w_top3=0.4):
+    """
+    Tính toán hệ số boost dựa trên mức độ rải rác của vector tỷ lệ phần trăm.
+    Tham số:
+    - vector: list/array các tỷ lệ (tổng = 1.0)
+    - min_boost: Hệ số boost thấp nhất (khi dồn hết vào 1 phần tử)
+    - max_boost: Hệ số boost cao nhất (khi rải rác đều)
+    - w_top1: Mức độ phạt nếu p1 quá cao (0.0 đến 1.0)
+    - w_top2: Mức độ phạt nếu p2 chiếm dụng quá lớn phần còn lại (0.0 đến 1.0)
+    """
+    arr = np.array(vector, dtype=float)
+    
+    # Xử lý ngoại lệ nếu vector rỗng hoặc chỉ có 1 phần tử
+    if len(arr) <= 1:
+        return min_boost
+        
+    # Lấy ra Top 1 và Top 2 lớn nhất
+    sorted_arr = np.sort(arr)[::-1]
+    p1 = sorted_arr[0]
+    p2 = sorted_arr[1]
+    
+    # Tính phần trăm còn lại sau khi loại trừ Top 1
+    remainder = 1.0 - p1
+    epsilon = 1e-9 # Tránh lỗi chia cho 0
+    
+    # -----------------------------------------
+    # QUY TẮC 1: Đánh giá dựa trên Top 1
+    # p1 càng lớn (nghiêng về 1 phần tử) -> f1 càng nhỏ
+    # -----------------------------------------
+    alpha = 15.0 
+
+    # Tính toán penalty đã được chuẩn hóa về [0, 1]
+    penalty_log = math.log(1.0 + alpha * p1) / math.log(1.0 + alpha)
+
+    # f1 = 1*p1*p1 -1.8*p1 + 1.2
+    f1 = 1.0 - (w_top1 * penalty_log)
+    # f1 = 1 - (w_top1 * p1)
+    f1 = max(0.0, f1)
+    
+    # -----------------------------------------
+    # QUY TẮC 2 & 3: Đánh giá Top 2 trong phần còn lại
+    # -----------------------------------------
+    if remainder <= epsilon:
+        # p1 đã chiếm 100%, không còn phần rải rác
+        f2 = 0.0
+    else:
+        # Tỷ lệ của Top 2 so với "Miếng bánh còn lại"
+        ratio_top2_in_remainder = p2 / remainder
+        
+        # ratio này càng lớn (phần còn lại dồn cho 1 thằng) -> f2 nhỏ xuống
+        # ratio này càng nhỏ (phần còn lại chia đều) -> f2 giữ mức lớn (dài ra)
+        f2 = 1.0 - (w_top2 * ratio_top2_in_remainder)
+        f2 = max(0.0, f2)
+
+    f3 = 1 - w_top3*length
+    f3 = max(0.0, f3)
+    
+    # Tính điểm rải rác chung (Score từ 0.0 -> 1.0)
+    # Score cao = Phân phối rải rác; Score thấp = Phân phối tập trung
+    dispersion_score = f1 * f2  * f3
+    
+    # Scale score về khoảng [min_boost, max_boost]
+    boost_factor = min_boost + (dispersion_score * (max_boost - min_boost))
+    
+    return round(boost_factor, 4)

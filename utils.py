@@ -18,6 +18,21 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
+
+def average_list_tensors(list_of_local_grads):
+    # list_of_local_grads có dạng: [ [g_client1_layer1, g_client1_layer2], [g_client2_layer1, g_client2_layer2], ... ]
+    nr_clients = len(list_of_local_grads)
+    nr_layers = len(list_of_local_grads[0])
+    
+    avg_grads = []
+    for layer_idx in range(nr_layers):
+        # Cộng layer tương ứng từ tất cả các clients
+        layer_sum = torch.stack([client_grad[layer_idx] for client_grad in list_of_local_grads]).sum(dim=0)
+        avg_grads.append(layer_sum / nr_clients)
+    
+    return avg_grads
+
+    
 def average_weights(w):
     """
     average the weights from all local models

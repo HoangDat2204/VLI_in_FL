@@ -1,6 +1,6 @@
 from client.client_utils import estimate_static_RLU, estimated_entropy_from_grad, estimate_static_RLU_with_posterior
 from client.client_utils import estimate_static_LLG,estimate_static_ZLG
-from client.client_utils import create_synthetic_basis_matrix, calculate_distribution_ratios
+from client.client_utils import create_synthetic_basis_matrix, calculate_distribution_ratios, calculate_dynamic_boost
 import numpy as np
 import torch
 import copy
@@ -25,12 +25,13 @@ def VLI_attack( gradients_for_prediction, args):
     Basis = create_synthetic_basis_matrix(args.n_classes, base_diagonal_val)
     probs = calculate_distribution_ratios(gradients_for_prediction, Basis)
     max_p = np.max(probs)
-    
+    length = np.linalg.norm(gradients_for_prediction)
+
 
     
     
     
-    boost_factor = alpha  + beta * (1.0 - max_p)
+    boost_factor = calculate_dynamic_boost(probs, length)
     
     final_diagonal_val = base_diagonal_val * boost_factor
     Basis = create_synthetic_basis_matrix(args.n_classes, final_diagonal_val)
@@ -64,6 +65,38 @@ def ZLGp_attack(model, gradients_for_prediction, O_bar, pj, aux_dataset, args):
     prop = (args.local_epochs * args.batch_size) / sum(n)
     for i in range(args.n_classes):
         n[i] = round(n[i] * prop)
+    return n
+
+
+
+def LLG_attack(model, gradients_for_prediction, args):
+    
+
+    h1_extraction = []
+    negative_gradient = 0.0
+    for i_cg, class_gradient in enumerate(gradients_for_prediction):
+        if class_gradient < 0:
+            h1_extraction.append((i_cg, class_gradient))
+            negative_gradient += class_gradient
+    
+    new_impact = (1+1/args.n_classes)* (negative_gradient/ (args.batch_size))
+    prediction = []
+
+    for (i_c, _) in h1_extraction:
+        prediction.append(i_c)
+        gradients_for_prediction[i_c] = gradients_for_prediction[i_c].add(-new_impact)
+
+    for _ in range(args.batch_size - len(prediction)):
+        # add minimal candidate, likely to be doubled, to prediction
+        min_id = torch.argmin(gradients_for_prediction).item()
+        prediction.append(min_id)
+
+        # add the mean value of one occurrence to the candidate
+        gradients_for_prediction[min_id] = gradients_for_prediction[min_id].add(-new_impact)
+
+    n = []
+    for i in range(args.n_classes):
+        n.append(args.local_epochs * prediction.count(i))
     return n
 
 

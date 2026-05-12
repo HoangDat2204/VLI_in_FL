@@ -50,11 +50,18 @@ def args_parser():
     parser.add_argument('--momentum', default=0.0, type=float, metavar='M',
                     help='momentum')
     
-    parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
+    parser.add_argument('--weight_decay', '--wd', default=1e-3, type=float,
                     metavar='W', help='weight decay (default: 1e-4)')
+
+    
+    parser.add_argument('--alpha_coefficient', '--ac', default=1e-2, type=float,
+                    metavar='W', help='alpha coefficient (only for FedDyn)')
     
     parser.add_argument('-c', '--checkpoint', default='./checkpoints', type=str, metavar='PATH',
                     help='path to save checkpoint')
+
+    parser.add_argument('-cpph', '--check_point_path', default='resnet18_CIFAR10_acc_92.63.pth', type=str, metavar='PATH',
+                    help='path to get checkpoint')
     
     args = parser.parse_args()
     return args

@@ -285,22 +285,28 @@ def clients_set_shard(file_name, n_clients, batch_size=64, shuffle=True):
 def count_data_partitions(list_loaders, dataset):
     n_clients = len(list_loaders)
     Counts = []
-    if dataset == 'MNIST' or 'CIFAR10' or 'SVHN':
+    if dataset in ['MNIST', 'CIFAR10', 'SVHN']:
         n_classes = 10
-    if dataset == 'CIFAR100':
+    elif dataset == 'CIFAR100':
         n_classes = 100
-    if dataset == 'TinyImageNet':
+    elif dataset == 'TinyImageNet':
         n_classes = 200
+    elif dataset == 'CelebA':
+        n_classes = 40
+    else:
+        raise ValueError(f"Dataset {dataset} chưa được hỗ trợ.")
     for idx in range(n_clients):
-        counts = [0]*n_classes
-        for batch_idx,(X,y) in enumerate(list_loaders[idx]):
-            batch_size = len(y)
+        counts = np.zeros(n_classes, dtype=int)
+        for batch_idx, (X, y) in enumerate(list_loaders[idx]):
             y = np.array(y)
-            for i in range(batch_size):
-                counts[int(y[i])] += 1
-        Counts.append(counts)
+            if dataset == 'CelebA':
+                counts += np.sum(y, axis=0).astype(int)
+            else:
+                for i in range(len(y)):
+                    counts[int(y[i])] += 1                
+        Counts.append(counts.tolist())
+        
     return Counts
-
 
 
 class ShardDataset(Dataset):
@@ -480,7 +486,37 @@ def get_dataloaders_Dirichlet(n_clients, alpha=0.5,rand_seed = 0, dataset = 'CIF
         
         file_name_labels = f"data_partitions/TinyImageNet_train_{n_clients}_alpha{alpha}_seed{rand_seed}_labels.pkl"
         path_labels = data_dir + file_name_labels
+
+    if dataset == 'CelebA':
+        # CelebA có 40 thuộc tính (binary attributes)
+        K = 40 
+        data_dir = './data/'
         
+        # Transform chuẩn cho CelebA (thường cần resize vì ảnh gốc có kích thước khác nhau)
+        apply_transform = transforms.Compose([
+            transforms.Resize((64, 64)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+        
+        train_dataset = datasets.CelebA(data_dir, split='train', download=False,
+                                        target_type='attr', transform=apply_transform)
+        test_dataset = datasets.CelebA(data_dir, split='test', download=False,
+                                       target_type='attr', transform=apply_transform)
+        
+        # Lấy nhãn (Attributes) chuyển sang numpy array
+        y_train = train_dataset.attr.numpy()
+        y_test = test_dataset.attr.numpy()
+        
+        # Đường dẫn lưu trữ phân mảnh dữ liệu (Data Partitions)
+        file_name_train = f"data_partitions/CelebA_train_{n_clients}_alpha{alpha}_seed{rand_seed}.pkl"
+        path_train = data_dir + file_name_train
+    
+        file_name_test = f"data_partitions/CelebA_test_{n_clients}_alpha{alpha}_seed{rand_seed}.pkl"
+        path_test = data_dir + file_name_test
+        
+        file_name_labels = f"data_partitions/CelebA_train_{n_clients}_alpha{alpha}_seed{rand_seed}_labels.pkl"
+        path_labels = data_dir + file_name_labels
         
     if not os.path.isfile(path_train):
         

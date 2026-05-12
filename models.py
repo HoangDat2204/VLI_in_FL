@@ -235,7 +235,7 @@ class MobileNetV2(nn.Module):
     def __init__(
         self,
         num_classes=10,
-        channel=3,
+        channel=1,
         width_mult=1.0,
         norm_layer=None,
         pool='avg',

@@ -9,8 +9,9 @@ from torchvision.datasets import ImageFolder
 from models import get_model
 from client.client_base import Client
 from client.client_prox import Client_prox
+from client.client_dyn import Client_dyn
 import random
-from utils import accuracy,average_weights,sum_list,global_acc
+from utils import accuracy,average_weights,sum_list,global_acc, average_list_tensors
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -54,10 +55,12 @@ if args.dataset == 'CIFAR100':
                                             transform=apply_transform)
 
 if args.dataset == 'MNIST':
-    test_dataset = datasets.MNIST(data_dir, train=False, download=True,
-                                  transform=apply_transform)
-    total_train_dataset = datasets.MNIST(data_dir, train=True, download=True,
-                                         transform=apply_transform)
+    apply_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,)) 
+    ])
+    test_dataset = datasets.MNIST(data_dir, train=False, download=True, transform=apply_transform)
+    total_train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=apply_transform)
 
 
 if args.dataset == 'Tiny':
@@ -66,6 +69,21 @@ if args.dataset == 'Tiny':
 
     test_dataset = ImageFolder(root=test_data_path, transform=apply_transform)
     total_train_dataset = ImageFolder(root=train_data_path, transform=apply_transform)
+
+
+if args.dataset == 'CelebA':
+
+    
+    data_dir = './data/'
+    
+    # Khởi tạo tập test
+    test_dataset = datasets.CelebA(data_dir, split='test', download=True,
+                                   target_type='attr', transform=apply_transform)
+    
+    # Khởi tạo tập train (tương ứng với total_train_dataset)
+    total_train_dataset = datasets.CelebA(data_dir, split='train', download=True,
+                                          target_type='attr', transform=apply_transform)
+
 
 random.seed(42)
 label_dict = {}
@@ -95,7 +113,13 @@ print(f"Số lượng batch: {num_batches}")
 total_loader_train = torch.utils.data.DataLoader(total_train_dataset, batch_size=args.batch_size,shuffle=True)
 
 # create global model
-channel = 3
+if args.dataset == 'MNIST':
+    channel = 1
+elif args.dataset in ['CIFAR10', 'CIFAR100', 'CUB200', 'Tiny']:
+    channel = 3
+else:
+    channel = 3 # Giá trị mặc định an toàn
+    
 tanh = False
 if args.activation == 'tanh':
     tanh = True
@@ -109,22 +133,34 @@ global_model = get_model(model_name=args.model,
                          tanh=tanh,
                          leaky_relu=False).cuda()
 
-checkpoint = torch.load('resnet18_CIFAR10_acc_92.63.pth', map_location=torch.device('cpu'), weights_only = False)
-# global_model.load_state_dict(checkpoint)
+checkpoint = torch.load("resnet18_CIFAR10_acc_92.63.pth", map_location=torch.device('cpu'), weights_only = False)
+global_model.load_state_dict(checkpoint)
 global_weights = global_model.state_dict()
 
 
 print("==> creating models")
 Clients = []
+
+alpha_coef = args.alpha_coefficient
+weight_list = np.asarray([len(Loaders_train[idx].dataset) for idx in range(args.n_clients)])
+print(weight_list)
+weight_list = weight_list / np.sum(weight_list) * args.n_clients
+
+
 for idx in range(args.n_clients):
     if args.fl_scheme == 'fedavg':
         Clients.append(Client(args, Loaders_train[idx], idx, device, args.model, aux_dataset))
     if args.fl_scheme == 'fedprox':
         Clients.append(Client_prox(args, Loaders_train[idx], idx, device, args.model, aux_dataset))
+    if args.fl_scheme == 'feddyn':
+        alpha_coef_adpt = alpha_coef / weight_list[idx]
+
+
+        Clients.append(Client_dyn(args, Loaders_train[idx], idx, device, args.model, aux_dataset, alpha_coef_adpt))
 
 # Attacking after training the global model
-# args.epochs = 20 # Giả sử bạn set lại epoch > 0 để chạy
-# best_acc = 90.0
+args.epochs = 20 # Giả sử bạn set lại epoch > 0 để chạy
+best_acc = 80.0
 
 # for epoch in range(args.epochs):
 #     local_weights = []
@@ -148,58 +184,125 @@ for idx in range(args.n_clients):
 #     print(f'Top 1 training accuracy: {acc_top1}, Top 5 accuracy: {acc_top5} at global round {epoch}.')
 
 #     # --- ĐOẠN CODE LƯU CHECKPOINT ---
-#     if acc_top1 > 90.0 or epoch == (args.epochs - 1):
-#         checkpoint_path = f'{args.model}_{args.dataset}_acc_{acc_top1:.2f}.pth'
+#     checkpoint_path = f'{args.model}_{args.dataset}_acc_{acc_top1:.2f}_{epoch}.pth'
         
 #         # Lưu state_dict của global model
-#         torch.save(global_model.state_dict(), checkpoint_path)
-#         print(f'---> Saved checkpoint: {checkpoint_path}')
+#     torch.save(global_model.state_dict(), checkpoint_path)
+#     print(f'---> Saved checkpoint: {checkpoint_path}')
+        
         
       
 cAcc = []
 iAcc = []
-cAccOverall = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-iACcOverall = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-methods = ['RLU', 'LLGp', 'ZLGp', 'VLI']
+cAccOverall = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0, 'LLG':0.0}
+iACcOverall = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0, 'LLG':0.0}
+methods = ['RLU', 'LLGp', 'ZLGp', 'VLI', 'LLG']
 
-for idx in range(args.n_clients):
-    print('client: ', idx)
-    Clients[idx].load_model(global_weights)
-    if args.scheme == 'iRLG':
-        acc1, acc2 = Clients[idx].iRLG(global_weights)
-    if args.scheme == 'RLU':
-        acc1, acc2 = Clients[idx].RLU(global_weights)
-    if args.scheme == 'LLGp':
-        acc1, acc2 = Clients[idx].LLGp(global_weights)
-    if args.scheme == 'ZLGp':
-        acc1, acc2 = Clients[idx].ZLGp(global_weights)
-    if args.scheme == 'VLI':
-        acc1, acc2 = Clients[idx].VLI(global_weights)
-    if args.scheme == 'All':
-        cAccOverall1, iACcOverall2 = Clients[idx].overall_attacks(global_weights)
+
+if args.fl_scheme == 'feddyn':
+    args.epochs = 1000 
+    best_acc = 80.0
+    
+    for Global_epoch in range(args.epochs):
+        print(f'\n | Global Training Round : {Global_epoch+1} |\n')
+        
+        
+        local_weights = [0] * args.n_clients
+        local_grads = [0] * args.n_clients
+        global_model.train()
+        inc_seed = 0
+        rand_seed=0
+        activation_threshold = 0.2
+        
+        save_period = 3
+
+        
+        while(True):
+            np.random.seed(Global_epoch + rand_seed + inc_seed)
+            activation_prob_list    = np.random.uniform(size=args.n_clients)
+            activated_clients = activation_prob_list <= activation_threshold
+            selected_clients = np.sort(np.where(activated_clients)[0])
+            inc_seed += 1
+            if len(selected_clients) != 0:
+                break
+        
+        print('Selected Clients: %s' %(', '.join(['%2d' %item for item in selected_clients])))
+
+        for idx in selected_clients:
+            Clients[idx].load_model(global_weights)
+            cAccOverall1, iACcOverall2  = Clients[idx].local_training(Global_epoch)
+            local_weights[idx] = Clients[idx].model.state_dict()
+            local_grads[idx] = Clients[idx].local_grad_vector
+            for m in methods:
+                cAccOverall[m] += cAccOverall1[m]
+                iACcOverall[m] += iACcOverall2[m]
+    
+        avg_global_weights = average_weights([local_weights[i] for i in selected_clients])
+        list_avg_grads = average_list_tensors([local_grads[i] for i in selected_clients])
+        
+        trainable_params_names = [name for name, param in global_model.named_parameters()]
+
+        for i, name in enumerate(trainable_params_names):
+            avg_global_weights[name] += list_avg_grads[i]
+
+        
+        global_weights = avg_global_weights
+        global_model.load_state_dict(global_weights)
+        
+        acc_top1, acc_top5 = global_acc(global_model, total_loader_train)
+        print(f'Top 1 training accuracy: {acc_top1}, Top 5 accuracy: {acc_top5} at global round {Global_epoch}.')
+
+        average_cAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
+        average_iAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
+        for m in methods:
+            average_cAcc[m] = cAccOverall[m]/ len(selected_clients)
+            average_iAcc[m] = iACcOverall[m]/ len(selected_clients)
+        for m in methods:
+            print('average cAcc: ', average_cAcc[m])
+            print('average iAcc: ', average_iAcc[m])
+        for m in methods:
+            cAccOverall[m] = 0
+            iACcOverall[m] = 0
+else:   
+
+    for idx in range(args.n_clients):
+        print('client: ', idx)
+        Clients[idx].load_model(global_weights)
+        if args.scheme == 'iRLG':
+            acc1, acc2 = Clients[idx].iRLG(global_weights)
+        if args.scheme == 'RLU':
+            acc1, acc2 = Clients[idx].RLU(global_weights)
+        if args.scheme == 'LLGp':
+            acc1, acc2 = Clients[idx].LLGp(global_weights)
+        if args.scheme == 'ZLGp':
+            acc1, acc2 = Clients[idx].ZLGp(global_weights)
+        if args.scheme == 'VLI':
+            acc1, acc2 = Clients[idx].VLI(global_weights)
+        if args.scheme == 'All':
+            cAccOverall1, iACcOverall2 = Clients[idx].overall_attacks(global_weights)
+        
+        if args.scheme != 'All':
+            cAcc.append(acc1)
+            iAcc.append(acc2)
+        elif args.scheme == 'All':
+            for m in methods:
+                cAccOverall[m] += cAccOverall1[m]
+                iACcOverall[m] += iACcOverall2[m]
+    
     
     if args.scheme != 'All':
-        cAcc.append(acc1)
-        iAcc.append(acc2)
+        average_cAcc = np.mean(np.array(cAcc))
+        average_iAcc = np.mean(np.array(iAcc))
+        print('average cAcc: ', average_cAcc)
+        print('average iAcc: ', average_iAcc)
+    
     elif args.scheme == 'All':
+        average_cAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
+        average_iAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
         for m in methods:
-            cAccOverall[m] += cAccOverall1[m]
-            iACcOverall[m] += iACcOverall2[m]
-
-
-if args.scheme != 'All':
-    average_cAcc = np.mean(np.array(cAcc))
-    average_iAcc = np.mean(np.array(iAcc))
-    print('average cAcc: ', average_cAcc)
-    print('average iAcc: ', average_iAcc)
-
-elif args.scheme == 'All':
-    average_cAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-    average_iAcc = {'RLU' : 0.0, 'LLGp': 0.0, 'ZLGp': 0.0, 'VLI': 0.0}
-    for m in methods:
-        average_cAcc[m] = np.mean(cAccOverall[m])
-        average_iAcc[m] = np.mean(iACcOverall[m])
-    for m in methods:
-        print('average cAcc: ', average_cAcc[m])
-        print('average iAcc: ', average_iAcc[m])
-
+            average_cAcc[m] = np.mean(cAccOverall[m])
+            average_iAcc[m] = np.mean(iACcOverall[m])
+        for m in methods:
+            print('average cAcc: ', average_cAcc[m])
+            print('average iAcc: ', average_iAcc[m])
+    
