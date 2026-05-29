@@ -45,7 +45,7 @@ python main.py --scheme ZLGp --local_epoch 10 --dataset SVHN --momentum 0.0 --al
 ```
 python main.py --scheme iRLG --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
 python main.py --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512 --scheme RLU 
-python main.py  --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model resnet18 --hidden 512 --scheme All
+python main.py  --local_epoch 10 --dataset SVHN --momentum 0.0 --alpha 0.5 --batch_size 32 --model mobilenetv2 --hidden 512 --scheme All
 python main.py --scheme ZLGp --local_epoch 10 --dataset CIFAR10 --momentum 0.0 --alpha 0.5 --batch_size 64 --model vgg16 --hidden 512
 ```
 

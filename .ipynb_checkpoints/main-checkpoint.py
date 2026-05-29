@@ -133,7 +133,7 @@ global_model = get_model(model_name=args.model,
                          tanh=tanh,
                          leaky_relu=False).cuda()
 
-checkpoint = torch.load("resnet18_CIFAR10_acc_92.63.pth", map_location=torch.device('cpu'), weights_only = False)
+checkpoint = torch.load("lenet5_SVHN_acc_88.58_19.pth", map_location=torch.device('cpu'), weights_only = False)
 global_model.load_state_dict(checkpoint)
 global_weights = global_model.state_dict()
 

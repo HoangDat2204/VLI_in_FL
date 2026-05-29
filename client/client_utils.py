@@ -499,8 +499,7 @@ def estimate_static_VLI_RLU(args, model, aux_dataset):
     return mu, shift
 
 
-
-def calculate_dynamic_boost(vector, length, min_boost=1.0, max_boost=3.0, w_top1=0.7, w_top2=0.0, w_top3=0.4):
+def calculate_dynamic_boost(vector, length, neg_val, min_boost=1.0, max_boost=12.0, w_top1=0.9, w_top2=2, w_top3 = 20.0):
     """
     Tính toán hệ số boost dựa trên mức độ rải rác của vector tỷ lệ phần trăm.
     Tham số:
@@ -519,18 +518,10 @@ def calculate_dynamic_boost(vector, length, min_boost=1.0, max_boost=3.0, w_top1
     # Lấy ra Top 1 và Top 2 lớn nhất
     sorted_arr = np.sort(arr)[::-1]
     p1 = sorted_arr[0]
-    p2 = sorted_arr[1]
     
-    # Tính phần trăm còn lại sau khi loại trừ Top 1
-    remainder = 1.0 - p1
-    epsilon = 1e-9 # Tránh lỗi chia cho 0
-    
-    # -----------------------------------------
-    # QUY TẮC 1: Đánh giá dựa trên Top 1
-    # p1 càng lớn (nghiêng về 1 phần tử) -> f1 càng nhỏ
-    # -----------------------------------------
-    alpha = 15.0 
 
+    alpha = 10
+    print(vector)
     # Tính toán penalty đã được chuẩn hóa về [0, 1]
     penalty_log = math.log(1.0 + alpha * p1) / math.log(1.0 + alpha)
 
@@ -539,29 +530,17 @@ def calculate_dynamic_boost(vector, length, min_boost=1.0, max_boost=3.0, w_top1
     # f1 = 1 - (w_top1 * p1)
     f1 = max(0.0, f1)
     
-    # -----------------------------------------
-    # QUY TẮC 2 & 3: Đánh giá Top 2 trong phần còn lại
-    # -----------------------------------------
-    if remainder <= epsilon:
-        # p1 đã chiếm 100%, không còn phần rải rác
-        f2 = 0.0
-    else:
-        # Tỷ lệ của Top 2 so với "Miếng bánh còn lại"
-        ratio_top2_in_remainder = p2 / remainder
-        
-        # ratio này càng lớn (phần còn lại dồn cho 1 thằng) -> f2 nhỏ xuống
-        # ratio này càng nhỏ (phần còn lại chia đều) -> f2 giữ mức lớn (dài ra)
-        f2 = 1.0 - (w_top2 * ratio_top2_in_remainder)
-        f2 = max(0.0, f2)
-
-    f3 = 1 - w_top3*length
-    f3 = max(0.0, f3)
+  
     
+    f2 = 1 / (w_top2*length + 1)
+    f2 = max(0.0, f2)
+
+    f3 = 1 / w_top3**(100*neg_val) 
     # Tính điểm rải rác chung (Score từ 0.0 -> 1.0)
     # Score cao = Phân phối rải rác; Score thấp = Phân phối tập trung
-    dispersion_score = f1 * f2  * f3
+    dispersion_score = f1    * f2 * f3
     
     # Scale score về khoảng [min_boost, max_boost]
     boost_factor = min_boost + (dispersion_score * (max_boost - min_boost))
     
-    return round(boost_factor, 4)
+    return boost_factor

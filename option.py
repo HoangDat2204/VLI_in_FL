@@ -33,7 +33,7 @@ def args_parser():
     parser.add_argument('--local_epochs', default = 1, type=int, metavar='N')
     
     
-    parser.add_argument('--lr', '--learning-rate', default=0.05, type=float,
+    parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 
     parser.add_argument('--scheme', default='RLU',type=str,

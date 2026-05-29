@@ -561,7 +561,7 @@ class Client(object):
                 max_idx = np.argmax(probs)
                 max_p = probs[max_idx]
                 print("probs: ", probs)
-                accelerate = calculate_dynamic_boost(probs, length)
+                accelerate = calculate_dynamic_boost(probs, length,-base_diagonal_val)
                 print("boost value: ", accelerate)
                 
                 # boost_factor = alpha + beta * accelerate
@@ -682,7 +682,7 @@ class Client(object):
                 result_Acc['RLU'], result_irec['RLU'], result_cAcc['RLU'] = self.accuracy_calculation(RLU_attack(model = copy.deepcopy(self.model) , w_grad_epochs = w_grad_epochs, b_grad_epochs =  b_grad_epochs, latent_dim =  self.latent_dim, mu =  self.mu,  aux_dataset = self.aux_dataset, args =  self.args), existences, num_instances)
                 result_Acc['ZLGp'], result_irec['ZLGp'], result_cAcc['ZLGp'] = self.accuracy_calculation(ZLGp_attack(model = copy.deepcopy(self.model), gradients_for_prediction =  torch.sum(w_grad_epochs, dim=-1), O_bar = O_bar , pj = pj, aux_dataset = self.aux_dataset, args = self.args), existences, num_instances)
                 result_Acc['LLGp'], result_irec['LLGp'], result_cAcc['LLGp'] = self.accuracy_calculation(LLGp_attack(model = copy.deepcopy(self.model), gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1), impact = impact, offset = offset, aux_dataset = self.aux_dataset,args = self.args), existences, num_instances)
-                result_Acc['VLI'], result_irec['VLI'], result_cAcc['VLI'] =  self.accuracy_calculation(VLI_attack( b_grad_epochs * self.args.local_epochs, self.args), existences, num_instances)
+                result_Acc['VLI'], result_irec['VLI'], result_cAcc['VLI'] =  self.accuracy_calculation(VLI_attack(b_grad_epochs * self.args.local_epochs, self.args), existences, num_instances)
 
                 result_Acc['LLG'], result_irec['LLG'], result_cAcc['LLG'] = self.accuracy_calculation(LLG_attack(model = copy.deepcopy(self.model), gradients_for_prediction = torch.sum(w_grad_epochs, dim=-1), args = self.args), existences, num_instances)
 

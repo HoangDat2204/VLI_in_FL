@@ -9,9 +9,7 @@ import scipy
 
 
 def VLI_attack( gradients_for_prediction, args): 
-    #VLI
-    alpha= 1.7 #1.0 #1.0 #1.5
-    beta = 2.0 #1.0 #2.0 #3.0
+
     negative_elements = gradients_for_prediction[gradients_for_prediction < 0]
     
     if len(negative_elements) > 0:
@@ -31,7 +29,7 @@ def VLI_attack( gradients_for_prediction, args):
     
     
     
-    boost_factor = calculate_dynamic_boost(probs, length)
+    boost_factor = calculate_dynamic_boost(probs, length, -base_diagonal_val)
     
     final_diagonal_val = base_diagonal_val * boost_factor
     Basis = create_synthetic_basis_matrix(args.n_classes, final_diagonal_val)
@@ -66,7 +64,6 @@ def ZLGp_attack(model, gradients_for_prediction, O_bar, pj, aux_dataset, args):
     for i in range(args.n_classes):
         n[i] = round(n[i] * prop)
     return n
-
 
 
 def LLG_attack(model, gradients_for_prediction, args):
